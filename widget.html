@@ -1,0 +1,983 @@
+<h2 class="sr-only">Mini-Casino mit Startmenu fuer Slots, Wuerfel und Blackjack, einem Leaderboard und einem Upgrade-System fuer Symbole und Zahlen</h2>
+
+<div id="app"></div>
+
+<script>
+(function() {
+  const START_BALANCE = 100000;
+  const MAX_LEVEL = 5;
+
+  let screen = 'menu';
+  let balance = START_BALANCE;
+  let xp = 0;
+  let spinCount = 0;
+
+  const rampColors = {
+    red: { bg: '#FCEBEB', fg: '#791F1F' },
+    amber: { bg: '#FAEEDA', fg: '#633806' },
+    coral: { bg: '#FAECE7', fg: '#712B13' },
+    blue: { bg: '#E6F1FB', fg: '#0C447C' },
+    purple: { bg: '#EEEDFE', fg: '#3C3489' },
+    gray: { bg: '#F1EFE8', fg: '#444441' }
+  };
+
+  const slotSymbols = [
+    { sym: 'C', icon: 'ti-cherry', label: 'Kirsche', ramp: 'red', baseWeight: 30, baseMult: 2 },
+    { sym: 'L', icon: 'ti-lemon2', label: 'Zitrone', ramp: 'amber', baseWeight: 25, baseMult: 3 },
+    { sym: 'O', icon: 'ti-circle-filled', label: 'Orange', ramp: 'coral', baseWeight: 20, baseMult: 5 },
+    { sym: 'D', icon: 'ti-diamond', label: 'Diamant', ramp: 'blue', baseWeight: 15, baseMult: 8 },
+    { sym: 'S', icon: 'ti-star-filled', label: 'Stern', ramp: 'purple', baseWeight: 7, baseMult: 12 },
+    { sym: 'B', icon: 'ti-bolt', label: 'Blitz 7', ramp: 'gray', baseWeight: 3, baseMult: 20 }
+  ];
+  let slotLevels = {};
+  slotSymbols.forEach(s => slotLevels[s.sym] = 0);
+
+  const diceNumbers = [1, 2, 3, 4, 5, 6];
+  let diceLevels = {};
+  diceNumbers.forEach(n => diceLevels[n] = 0);
+
+  const botNames = ['Max_K', 'LuckyLena', 'Tobi.S', 'CoinKaiser', 'NinaW', 'JackpotJo', 'FelixR', 'SpinQueen'];
+  let bots = botNames.map(name => ({ name, balance: 60000 + Math.floor(Math.random() * 220000) }));
+
+  function fmt(n) { return Math.round(n).toLocaleString('de-DE'); }
+
+  function upgradeCost(level) {
+    return 500 * (level + 1) * (level + 1);
+  }
+
+  function weightBonus(level) { return 1 + level * 0.06; }
+  function multBonus(level) { return 1 + level * 0.06; }
+
+  function jitterBots() {
+    bots = bots.map(b => {
+      const change = Math.floor((Math.random() - 0.45) * 4000);
+      return { ...b, balance: Math.max(5000, b.balance + change) };
+    });
+  }
+
+  function addXp(n) { xp += n; }
+
+  function gainCoins(n) { balance += n; if (balance < 0) balance = 0; }
+
+  function checkAutoReset() {
+    if (balance <= 0) {
+      setTimeout(() => {
+        balance = START_BALANCE;
+        render();
+      }, 700);
+      return true;
+    }
+    return false;
+  }
+
+  const app = document.getElementById('app');
+
+  function render() {
+    if (screen === 'menu') renderMenu();
+    else if (screen === 'slots') renderSlots();
+    else if (screen === 'dice') renderDice();
+    else if (screen === 'blackjack') renderBlackjack();
+    else if (screen === 'roulette') renderRoulette();
+    else if (screen === 'coinflip') renderCoinflip();
+    else if (screen === 'hilo') renderHilo();
+    else if (screen === 'wheel') renderWheel();
+    else if (screen === 'mines') renderMines();
+    else if (screen === 'upgrades') renderUpgrades();
+  }
+
+  function topBar(title) {
+    return '' +
+      '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">' +
+        '<div style="display:flex; align-items:center; gap:8px;">' +
+          (title ? '<button id="back-btn" style="width:32px; height:32px; padding:0;" aria-label="Zurueck"><i class="ti ti-arrow-left" aria-hidden="true"></i></button>' : '') +
+          '<span style="font-size:16px; font-weight:500;">' + (title || 'Mini-Casino') + '</span>' +
+        '</div>' +
+        '<div style="display:flex; gap:16px; align-items:center;">' +
+          '<div style="text-align:right;">' +
+            '<p style="font-size:10px; color:var(--color-text-secondary); margin:0;">Guthaben</p>' +
+            '<p style="font-size:14px; font-weight:500; margin:0;">' + fmt(balance) + '</p>' +
+          '</div>' +
+          '<div style="text-align:right;">' +
+            '<p style="font-size:10px; color:var(--color-text-secondary); margin:0;">XP</p>' +
+            '<p style="font-size:14px; font-weight:500; margin:0; color:var(--color-text-info);">' + fmt(xp) + '</p>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function leaderboardHtml() {
+    const all = [{ name: 'Du', balance: balance, isYou: true }, ...bots];
+    all.sort((a, b) => b.balance - a.balance);
+    let rows = '';
+    all.forEach((p, i) => {
+      rows += '<div style="display:flex; align-items:center; justify-content:space-between; padding:7px 8px; border-radius:var(--border-radius-md); background:' + (p.isYou ? 'var(--color-background-info)' : 'var(--color-background-secondary)') + ';">' +
+        '<div style="display:flex; align-items:center; gap:8px;">' +
+          '<span style="font-size:12px; color:var(--color-text-secondary); min-width:14px;">' + (i + 1) + '</span>' +
+          '<span style="font-size:13px; font-weight:' + (p.isYou ? '500' : '400') + '; color:' + (p.isYou ? 'var(--color-text-info)' : 'var(--color-text-primary)') + ';">' + p.name + '</span>' +
+        '</div>' +
+        '<span style="font-size:13px; font-weight:500; color:' + (p.isYou ? 'var(--color-text-info)' : 'var(--color-text-primary)') + ';">' + fmt(p.balance) + '</span>' +
+      '</div>';
+    });
+    return '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1rem 1.1rem;">' +
+      '<p style="font-size:14px; font-weight:500; margin:0 0 10px;"><i class="ti ti-trophy" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Leaderboard</p>' +
+      '<div style="display:flex; flex-direction:column; gap:6px;">' + rows + '</div>' +
+      '<p style="font-size:11px; color:var(--color-text-tertiary); margin:10px 0 0;">Nur Spass-Coins, kein Echtgeld. Andere Spieler sind simuliert.</p>' +
+    '</div>';
+  }
+
+  function renderMenu() {
+    app.innerHTML =
+      topBar('') +
+      '<div style="display:grid; grid-template-columns:1.3fr 1fr; gap:16px; align-items:start;">' +
+        '<div style="display:flex; flex-direction:column; gap:12px;">' +
+          gameCard('slots', 'ti-bolt', 'Slots', 'Drei Walzen, sechs Symbole') +
+          gameCard('dice', 'ti-dice-5', 'Wuerfel', 'Auf eine Zahl setzen') +
+          gameCard('blackjack', 'ti-cards', 'Blackjack', 'Gegen den Dealer auf 21') +
+          gameCard('roulette', 'ti-target', 'Roulette', 'Zahl, Farbe oder Bereich') +
+          gameCard('coinflip', 'ti-coin', 'Muenzwurf', 'Kopf oder Zahl, x2') +
+          gameCard('hilo', 'ti-arrows-vertical', 'Hi-Lo', 'Hoeher oder niedriger raten') +
+          gameCard('wheel', 'ti-rotate', 'Gluecksrad', 'Acht Felder, ein Dreh') +
+          gameCard('mines', 'ti-bomb', 'Mines', 'Felder aufdecken, Minen meiden') +
+          '<button id="upgrades-btn" style="width:100%; height:44px; font-size:14px; font-weight:500; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="ti ti-arrow-big-up-lines" aria-hidden="true"></i>Upgrades (XP ausgeben)</button>' +
+        '</div>' +
+        leaderboardHtml() +
+      '</div>';
+
+    document.getElementById('upgrades-btn').addEventListener('click', () => { screen = 'upgrades'; render(); });
+    ['slots', 'dice', 'blackjack', 'roulette', 'coinflip', 'hilo', 'wheel', 'mines'].forEach(g => {
+      document.getElementById('card-' + g).addEventListener('click', () => { screen = g; render(); });
+    });
+  }
+
+  function gameCard(id, icon, title, sub) {
+    return '<div id="card-' + id + '" style="cursor:pointer; background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1rem 1.25rem; display:flex; align-items:center; gap:14px;">' +
+      '<div style="width:40px; height:40px; border-radius:var(--border-radius-md); background:var(--color-background-secondary); display:flex; align-items:center; justify-content:center;"><i class="ti ' + icon + '" style="font-size:20px;" aria-hidden="true"></i></div>' +
+      '<div style="flex:1;"><p style="font-size:15px; font-weight:500; margin:0;">' + title + '</p><p style="font-size:12px; color:var(--color-text-secondary); margin:0;">' + sub + '</p></div>' +
+      '<i class="ti ti-chevron-right" style="font-size:18px; color:var(--color-text-tertiary);" aria-hidden="true"></i>' +
+    '</div>';
+  }
+
+  function backHandler() {
+    document.getElementById('back-btn').addEventListener('click', () => { screen = 'menu'; render(); });
+  }
+
+  let slotBet = 100;
+  function renderSlots() {
+    app.innerHTML =
+      topBar('Slots') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+          '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+          '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+          '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(slotBet) + '</span>' +
+          '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+          '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+        '</div>' +
+        '<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1.5rem 1rem; margin-bottom:1rem;">' +
+          '<div id="reels" style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">' +
+            [0, 1, 2].map(() => '<div class="reel" style="height:72px; display:flex; align-items:center; justify-content:center; font-size:30px; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary);"><i class="ti ti-bolt" aria-hidden="true"></i></div>').join('') +
+          '</div>' +
+        '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">Bereit zum Drehen</p>' +
+        '<button id="spin-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-player-play" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Drehen</button>' +
+      '</div>';
+
+    backHandler();
+    const betDisplay = document.getElementById('bet-display');
+    function updateBetButtons() {
+      document.getElementById('bet-down').disabled = slotBet <= 100;
+      document.getElementById('bet-up').disabled = slotBet + 100 > balance;
+    }
+    document.getElementById('bet-down').addEventListener('click', () => { if (slotBet > 100) { slotBet -= 100; betDisplay.textContent = fmt(slotBet); updateBetButtons(); } });
+    document.getElementById('bet-up').addEventListener('click', () => { if (slotBet + 100 <= balance) { slotBet += 100; betDisplay.textContent = fmt(slotBet); updateBetButtons(); } });
+    document.getElementById('bet-max').addEventListener('click', () => { slotBet = Math.max(100, balance); betDisplay.textContent = fmt(slotBet); updateBetButtons(); });
+    updateBetButtons();
+
+    const reelsEl = document.querySelectorAll('.reel');
+    const messageEl = document.getElementById('message');
+    const spinBtn = document.getElementById('spin-btn');
+    let spinning = false;
+
+    function weightedPick() {
+      const weighted = slotSymbols.map(s => ({ s, w: s.baseWeight * weightBonus(slotLevels[s.sym]) }));
+      const total = weighted.reduce((sum, x) => sum + x.w, 0);
+      let r = Math.random() * total;
+      for (const x of weighted) { if (r < x.w) return x.s; r -= x.w; }
+      return weighted[0].s;
+    }
+
+    function effMult(s) { return s.baseMult * multBonus(slotLevels[s.sym]); }
+
+    function payout(a, b, c) {
+      if (a.sym === b.sym && b.sym === c.sym) return effMult(a);
+      if (a.sym === b.sym || b.sym === c.sym || a.sym === c.sym) {
+        const matched = a.sym === b.sym ? a : (b.sym === c.sym ? b : a);
+        return Math.max(1, effMult(matched) * 0.4);
+      }
+      return 0;
+    }
+
+    function renderReel(el, s) {
+      const c = rampColors[s.ramp];
+      el.innerHTML = '<i class="ti ' + s.icon + '" aria-hidden="true"></i>';
+      el.style.background = c.bg;
+      el.style.color = c.fg;
+    }
+
+    spinBtn.addEventListener('click', () => {
+      if (spinning) return;
+      if (balance < slotBet) { messageEl.textContent = 'Nicht genug Guthaben fuer diesen Einsatz'; return; }
+      spinning = true;
+      spinBtn.disabled = true;
+      balance -= slotBet;
+      messageEl.textContent = 'Dreht...';
+      let ticks = 0;
+      const interval = setInterval(() => {
+        reelsEl.forEach(el => renderReel(el, slotSymbols[Math.floor(Math.random() * slotSymbols.length)]));
+        ticks++;
+        if (ticks >= 14) {
+          clearInterval(interval);
+          finish();
+        }
+      }, 80);
+    });
+
+    function finish() {
+      const result = [weightedPick(), weightedPick(), weightedPick()];
+      result.forEach((s, i) => renderReel(reelsEl[i], s));
+      const mult = payout(result[0], result[1], result[2]);
+      const winnings = mult > 0 ? Math.round(slotBet * mult) : 0;
+      gainCoins(winnings);
+      addXp(2);
+      spinCount++;
+      if (mult >= 20) messageEl.textContent = 'Jackpot! +' + fmt(winnings) + ' Coins (x' + mult.toFixed(1) + ')';
+      else if (mult > 1) messageEl.textContent = 'Gewonnen! +' + fmt(winnings) + ' Coins (x' + mult.toFixed(1) + ')';
+      else if (mult > 0) messageEl.textContent = 'Kleiner Gewinn +' + fmt(winnings) + ' Coins';
+      else messageEl.textContent = 'Kein Treffer. Nochmal versuchen';
+      jitterBots();
+      spinning = false;
+      spinBtn.disabled = false;
+      if (slotBet > balance && balance > 0) { slotBet = Math.max(100, balance); }
+      if (checkAutoReset()) { return; }
+      renderSlots();
+    }
+  }
+
+  let diceBet = 100;
+  let diceSelected = 3;
+  function renderDice() {
+    app.innerHTML =
+      topBar('Wuerfel') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 0 8px;">Zahl waehlen</p>' +
+        '<div id="number-grid" style="display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:1rem;">' +
+          diceNumbers.map(n => {
+            const lvl = diceLevels[n];
+            const m = (5 * multBonus(lvl)).toFixed(1);
+            return '<button class="num-btn" data-num="' + n + '" style="height:56px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; ' + (n === diceSelected ? 'border:2px solid var(--color-border-info); background:var(--color-background-info);' : '') + '">' +
+              '<span style="font-size:16px; font-weight:500;">' + n + '</span>' +
+              '<span style="font-size:10px; color:var(--color-text-secondary);">x' + m + '</span>' +
+            '</button>';
+          }).join('') +
+        '</div>' +
+        '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+          '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+          '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+          '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(diceBet) + '</span>' +
+          '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+          '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+        '</div>' +
+        '<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1.5rem 1rem; margin-bottom:1rem; display:flex; justify-content:center;">' +
+          '<div id="die" style="width:72px; height:72px; background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-md); display:flex; align-items:center; justify-content:center; font-size:30px;"><i class="ti ti-dice-' + diceSelected + '" aria-hidden="true"></i></div>' +
+        '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">Zahl waehlen und werfen</p>' +
+        '<button id="roll-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-player-play" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Werfen</button>' +
+      '</div>';
+
+    backHandler();
+    const betDisplay = document.getElementById('bet-display');
+    function updateBetButtons() {
+      document.getElementById('bet-down').disabled = diceBet <= 100;
+      document.getElementById('bet-up').disabled = diceBet + 100 > balance;
+    }
+    document.getElementById('bet-down').addEventListener('click', () => { if (diceBet > 100) { diceBet -= 100; betDisplay.textContent = fmt(diceBet); updateBetButtons(); } });
+    document.getElementById('bet-up').addEventListener('click', () => { if (diceBet + 100 <= balance) { diceBet += 100; betDisplay.textContent = fmt(diceBet); updateBetButtons(); } });
+    document.getElementById('bet-max').addEventListener('click', () => { diceBet = Math.max(100, balance); betDisplay.textContent = fmt(diceBet); updateBetButtons(); });
+    updateBetButtons();
+
+    document.querySelectorAll('.num-btn').forEach(btn => {
+      btn.addEventListener('click', () => { diceSelected = parseInt(btn.getAttribute('data-num')); renderDice(); });
+    });
+
+    const dieEl = document.getElementById('die');
+    const messageEl = document.getElementById('message');
+    const rollBtn = document.getElementById('roll-btn');
+    let rolling = false;
+
+    function weightedRoll() {
+      const weighted = diceNumbers.map(n => ({ n, w: weightBonus(diceLevels[n]) }));
+      const total = weighted.reduce((s, x) => s + x.w, 0);
+      let r = Math.random() * total;
+      for (const x of weighted) { if (r < x.w) return x.n; r -= x.w; }
+      return weighted[0].n;
+    }
+
+    rollBtn.addEventListener('click', () => {
+      if (rolling) return;
+      if (balance < diceBet) { messageEl.textContent = 'Nicht genug Guthaben fuer diesen Einsatz'; return; }
+      rolling = true;
+      rollBtn.disabled = true;
+      balance -= diceBet;
+      messageEl.textContent = 'Wuerfelt...';
+      let ticks = 0;
+      const interval = setInterval(() => {
+        const r = 1 + Math.floor(Math.random() * 6);
+        dieEl.innerHTML = '<i class="ti ti-dice-' + r + '" aria-hidden="true"></i>';
+        ticks++;
+        if (ticks >= 10) { clearInterval(interval); finish(); }
+      }, 80);
+    });
+
+    function finish() {
+      const result = weightedRoll();
+      dieEl.innerHTML = '<i class="ti ti-dice-' + result + '" aria-hidden="true"></i>';
+      addXp(2);
+      if (result === diceSelected) {
+        const mult = 5 * multBonus(diceLevels[diceSelected]);
+        const winnings = Math.round(diceBet * mult);
+        gainCoins(winnings);
+        messageEl.textContent = 'Treffer! ' + result + ' +' + fmt(winnings) + ' Coins (x' + mult.toFixed(1) + ')';
+      } else {
+        messageEl.textContent = 'Gewuerfelt: ' + result + '. Kein Treffer';
+      }
+      jitterBots();
+      rolling = false;
+      if (diceBet > balance && balance > 0) { diceBet = Math.max(100, balance); }
+      if (checkAutoReset()) { return; }
+      renderDice();
+    }
+  }
+
+  let bjBet = 100;
+  let bjState = null;
+  function freshDeck() {
+    const ranks = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+    const suits = ['ti-cards', 'ti-cards', 'ti-cards', 'ti-cards'];
+    let deck = [];
+    for (let i = 0; i < 6; i++) {
+      ranks.forEach(r => suits.forEach(() => deck.push(r)));
+    }
+    for (let i = deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+    return deck;
+  }
+  function cardValue(r) {
+    if (r === 'A') return 11;
+    if (r === 'J' || r === 'Q' || r === 'K') return 10;
+    return parseInt(r);
+  }
+  function handValue(cards) {
+    let total = cards.reduce((s, c) => s + cardValue(c), 0);
+    let aces = cards.filter(c => c === 'A').length;
+    while (total > 21 && aces > 0) { total -= 10; aces--; }
+    return total;
+  }
+
+  function renderBlackjack() {
+    if (!bjState) {
+      app.innerHTML =
+        topBar('Blackjack') +
+        '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+          '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+            '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+            '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+            '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(bjBet) + '</span>' +
+            '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+            '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+          '</div>' +
+          '<p style="text-align:center; font-size:14px; color:var(--color-text-secondary); margin:0 0 1rem;">Bereit fuer die naechste Runde</p>' +
+          '<button id="deal-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-cards" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Geben</button>' +
+        '</div>';
+      backHandler();
+      const betDisplay = document.getElementById('bet-display');
+      function updateBetButtons() {
+        document.getElementById('bet-down').disabled = bjBet <= 100;
+        document.getElementById('bet-up').disabled = bjBet + 100 > balance;
+      }
+      document.getElementById('bet-down').addEventListener('click', () => { if (bjBet > 100) { bjBet -= 100; betDisplay.textContent = fmt(bjBet); updateBetButtons(); } });
+      document.getElementById('bet-up').addEventListener('click', () => { if (bjBet + 100 <= balance) { bjBet += 100; betDisplay.textContent = fmt(bjBet); updateBetButtons(); } });
+      document.getElementById('bet-max').addEventListener('click', () => { bjBet = Math.max(100, balance); betDisplay.textContent = fmt(bjBet); updateBetButtons(); });
+      updateBetButtons();
+      document.getElementById('deal-btn').addEventListener('click', () => {
+        if (balance < bjBet) { document.querySelector('p[style*="text-align:center"]').textContent = 'Nicht genug Guthaben fuer diesen Einsatz'; return; }
+        balance -= bjBet;
+        const deck = freshDeck();
+        bjState = { deck, player: [deck.pop(), deck.pop()], dealer: [deck.pop(), deck.pop()], done: false, message: '' };
+        renderBlackjack();
+      });
+      return;
+    }
+
+    const playerVal = handValue(bjState.player);
+    const dealerVal = handValue(bjState.dealer);
+    const showDealerHole = bjState.done;
+
+    app.innerHTML =
+      topBar('Blackjack') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<div style="margin-bottom:1rem;">' +
+          '<p style="font-size:12px; color:var(--color-text-secondary); margin:0 0 6px;">Dealer ' + (showDealerHole ? '(' + dealerVal + ')' : '') + '</p>' +
+          '<div style="display:flex; gap:6px;">' + bjState.dealer.map((c, i) => cardEl(c, i === 1 && !showDealerHole)).join('') + '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:1rem;">' +
+          '<p style="font-size:12px; color:var(--color-text-secondary); margin:0 0 6px;">Du (' + playerVal + ')</p>' +
+          '<div style="display:flex; gap:6px;">' + bjState.player.map(c => cardEl(c, false)).join('') + '</div>' +
+        '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">' + (bjState.message || (playerVal === 21 ? 'Blackjack!' : 'Ziehen oder halten')) + '</p>' +
+        (bjState.done
+          ? '<button id="next-btn" style="width:100%; height:44px; font-size:15px; font-weight:500;">Naechste Runde</button>'
+          : '<div style="display:flex; gap:10px;">' +
+              '<button id="hit-btn" style="flex:1; height:44px; font-size:15px; font-weight:500;">Ziehen</button>' +
+              '<button id="stand-btn" style="flex:1; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;">Halten</button>' +
+            '</div>') +
+      '</div>';
+
+    backHandler();
+
+    if (!bjState.done) {
+      if (playerVal === 21) { finishRound('blackjack'); return; }
+      if (playerVal > 21) { finishRound('bust'); return; }
+
+      document.getElementById('hit-btn').addEventListener('click', () => {
+        bjState.player.push(bjState.deck.pop());
+        const v = handValue(bjState.player);
+        if (v > 21) { finishRound('bust'); } else { renderBlackjack(); }
+      });
+      document.getElementById('stand-btn').addEventListener('click', () => {
+        while (handValue(bjState.dealer) < 17) { bjState.dealer.push(bjState.deck.pop()); }
+        finishRound('compare');
+      });
+    } else {
+      document.getElementById('next-btn').addEventListener('click', () => { bjState = null; renderBlackjack(); });
+    }
+  }
+
+  function cardEl(rank, hidden) {
+    return '<div style="width:44px; height:60px; border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-md); background:' + (hidden ? 'var(--color-background-secondary)' : 'var(--color-background-primary)') + '; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:500;">' + (hidden ? '?' : rank) + '</div>';
+  }
+
+  function finishRound(kind) {
+    const playerVal = handValue(bjState.player);
+    const dealerVal = handValue(bjState.dealer);
+    addXp(3);
+    let msg = '';
+    if (kind === 'blackjack') {
+      const win = Math.round(bjBet * 2.5);
+      gainCoins(win);
+      msg = 'Blackjack! +' + fmt(win) + ' Coins';
+    } else if (kind === 'bust') {
+      msg = 'Ueberkauft mit ' + playerVal + '. Verloren';
+    } else {
+      if (dealerVal > 21 || playerVal > dealerVal) {
+        const win = bjBet * 2;
+        gainCoins(win);
+        msg = 'Gewonnen! ' + playerVal + ' gegen ' + dealerVal + '. +' + fmt(win) + ' Coins';
+      } else if (playerVal === dealerVal) {
+        gainCoins(bjBet);
+        msg = 'Unentschieden bei ' + playerVal + '. Einsatz zurueck';
+      } else {
+        msg = 'Verloren. ' + playerVal + ' gegen ' + dealerVal;
+      }
+    }
+    bjState.done = true;
+    bjState.message = msg;
+    jitterBots();
+    renderBlackjack();
+    checkAutoReset();
+  }
+
+  let rouletteBet = 100;
+  let rouletteChoice = { type: 'color', value: 'red' };
+  const rouletteRed = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
+  function renderRoulette() {
+    const numbers = [];
+    for (let i = 0; i <= 36; i++) numbers.push(i);
+    app.innerHTML =
+      topBar('Roulette') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<div style="display:flex; gap:8px; margin-bottom:1rem;">' +
+          '<button id="bet-red" style="flex:1; height:40px; font-size:13px; font-weight:500; ' + (rouletteChoice.type === 'color' && rouletteChoice.value === 'red' ? 'border:2px solid var(--color-border-info);' : '') + '">Rot (x2)</button>' +
+          '<button id="bet-black" style="flex:1; height:40px; font-size:13px; font-weight:500; ' + (rouletteChoice.type === 'color' && rouletteChoice.value === 'black' ? 'border:2px solid var(--color-border-info);' : '') + '">Schwarz (x2)</button>' +
+        '</div>' +
+        '<p style="font-size:12px; color:var(--color-text-secondary); margin:0 0 6px;">Oder genaue Zahl (x36)</p>' +
+        '<div id="number-grid" style="display:grid; grid-template-columns:repeat(8,1fr); gap:4px; margin-bottom:1rem; max-height:180px; overflow-y:auto;">' +
+          numbers.map(n => '<button class="rn-btn" data-num="' + n + '" style="height:30px; font-size:11px; padding:0; ' + (rouletteChoice.type === 'number' && rouletteChoice.value === n ? 'border:2px solid var(--color-border-info);' : '') + '">' + n + '</button>').join('') +
+        '</div>' +
+        '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+          '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+          '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+          '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(rouletteBet) + '</span>' +
+          '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+          '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+        '</div>' +
+        '<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1.5rem 1rem; margin-bottom:1rem; display:flex; justify-content:center;">' +
+          '<div id="ball" style="width:72px; height:72px; background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:500;">?</div>' +
+        '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">Farbe oder Zahl waehlen</p>' +
+        '<button id="spin-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-player-play" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Drehen</button>' +
+      '</div>';
+
+    backHandler();
+    document.getElementById('bet-red').addEventListener('click', () => { rouletteChoice = { type: 'color', value: 'red' }; renderRoulette(); });
+    document.getElementById('bet-black').addEventListener('click', () => { rouletteChoice = { type: 'color', value: 'black' }; renderRoulette(); });
+    document.querySelectorAll('.rn-btn').forEach(btn => {
+      btn.addEventListener('click', () => { rouletteChoice = { type: 'number', value: parseInt(btn.getAttribute('data-num')) }; renderRoulette(); });
+    });
+
+    const betDisplay = document.getElementById('bet-display');
+    function updateBetButtons() {
+      document.getElementById('bet-down').disabled = rouletteBet <= 100;
+      document.getElementById('bet-up').disabled = rouletteBet + 100 > balance;
+    }
+    document.getElementById('bet-down').addEventListener('click', () => { if (rouletteBet > 100) { rouletteBet -= 100; betDisplay.textContent = fmt(rouletteBet); updateBetButtons(); } });
+    document.getElementById('bet-up').addEventListener('click', () => { if (rouletteBet + 100 <= balance) { rouletteBet += 100; betDisplay.textContent = fmt(rouletteBet); updateBetButtons(); } });
+    document.getElementById('bet-max').addEventListener('click', () => { rouletteBet = Math.max(100, balance); betDisplay.textContent = fmt(rouletteBet); updateBetButtons(); });
+    updateBetButtons();
+
+    const ballEl = document.getElementById('ball');
+    const messageEl = document.getElementById('message');
+    const spinBtn = document.getElementById('spin-btn');
+    let spinning = false;
+
+    spinBtn.addEventListener('click', () => {
+      if (spinning) return;
+      if (balance < rouletteBet) { messageEl.textContent = 'Nicht genug Guthaben fuer diesen Einsatz'; return; }
+      spinning = true;
+      spinBtn.disabled = true;
+      balance -= rouletteBet;
+      messageEl.textContent = 'Dreht...';
+      let ticks = 0;
+      const interval = setInterval(() => {
+        ballEl.textContent = Math.floor(Math.random() * 37);
+        ticks++;
+        if (ticks >= 14) { clearInterval(interval); finish(); }
+      }, 90);
+    });
+
+    function finish() {
+      const result = Math.floor(Math.random() * 37);
+      ballEl.textContent = result;
+      const isRed = rouletteRed.includes(result);
+      const color = result === 0 ? 'gruen' : (isRed ? 'rot' : 'schwarz');
+      addXp(2);
+      let won = false;
+      let mult = 0;
+      if (rouletteChoice.type === 'color' && result !== 0) {
+        const matches = (rouletteChoice.value === 'red' && isRed) || (rouletteChoice.value === 'black' && !isRed);
+        if (matches) { won = true; mult = 2; }
+      } else if (rouletteChoice.type === 'number' && rouletteChoice.value === result) {
+        won = true; mult = 36;
+      }
+      if (won) {
+        const winnings = rouletteBet * mult;
+        gainCoins(winnings);
+        messageEl.textContent = result + ' (' + color + '). Gewonnen! +' + fmt(winnings) + ' Coins';
+      } else {
+        messageEl.textContent = result + ' (' + color + '). Kein Treffer';
+      }
+      jitterBots();
+      spinning = false;
+      if (rouletteBet > balance && balance > 0) { rouletteBet = Math.max(100, balance); }
+      if (checkAutoReset()) { return; }
+      renderRoulette();
+    }
+  }
+
+  let coinBet = 100;
+  let coinChoice = 'heads';
+  function renderCoinflip() {
+    app.innerHTML =
+      topBar('Muenzwurf') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<div style="display:flex; gap:8px; margin-bottom:1rem;">' +
+          '<button id="choice-heads" style="flex:1; height:40px; font-size:13px; font-weight:500; ' + (coinChoice === 'heads' ? 'border:2px solid var(--color-border-info);' : '') + '">Kopf</button>' +
+          '<button id="choice-tails" style="flex:1; height:40px; font-size:13px; font-weight:500; ' + (coinChoice === 'tails' ? 'border:2px solid var(--color-border-info);' : '') + '">Zahl</button>' +
+        '</div>' +
+        '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+          '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+          '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+          '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(coinBet) + '</span>' +
+          '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+          '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+        '</div>' +
+        '<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1.5rem 1rem; margin-bottom:1rem; display:flex; justify-content:center;">' +
+          '<div id="coin" style="width:72px; height:72px; background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:28px;"><i class="ti ti-coin" aria-hidden="true"></i></div>' +
+        '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">Kopf oder Zahl waehlen</p>' +
+        '<button id="flip-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-player-play" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Werfen</button>' +
+      '</div>';
+
+    backHandler();
+    document.getElementById('choice-heads').addEventListener('click', () => { coinChoice = 'heads'; renderCoinflip(); });
+    document.getElementById('choice-tails').addEventListener('click', () => { coinChoice = 'tails'; renderCoinflip(); });
+
+    const betDisplay = document.getElementById('bet-display');
+    function updateBetButtons() {
+      document.getElementById('bet-down').disabled = coinBet <= 100;
+      document.getElementById('bet-up').disabled = coinBet + 100 > balance;
+    }
+    document.getElementById('bet-down').addEventListener('click', () => { if (coinBet > 100) { coinBet -= 100; betDisplay.textContent = fmt(coinBet); updateBetButtons(); } });
+    document.getElementById('bet-up').addEventListener('click', () => { if (coinBet + 100 <= balance) { coinBet += 100; betDisplay.textContent = fmt(coinBet); updateBetButtons(); } });
+    document.getElementById('bet-max').addEventListener('click', () => { coinBet = Math.max(100, balance); betDisplay.textContent = fmt(coinBet); updateBetButtons(); });
+    updateBetButtons();
+
+    const coinEl = document.getElementById('coin');
+    const messageEl = document.getElementById('message');
+    const flipBtn = document.getElementById('flip-btn');
+    let flipping = false;
+
+    flipBtn.addEventListener('click', () => {
+      if (flipping) return;
+      if (balance < coinBet) { messageEl.textContent = 'Nicht genug Guthaben fuer diesen Einsatz'; return; }
+      flipping = true;
+      flipBtn.disabled = true;
+      balance -= coinBet;
+      messageEl.textContent = 'Wirft...';
+      let ticks = 0;
+      const interval = setInterval(() => {
+        coinEl.innerHTML = '<i class="ti ' + (ticks % 2 === 0 ? 'ti-coin' : 'ti-circle') + '" aria-hidden="true"></i>';
+        ticks++;
+        if (ticks >= 10) { clearInterval(interval); finish(); }
+      }, 80);
+    });
+
+    function finish() {
+      const result = Math.random() < 0.5 ? 'heads' : 'tails';
+      coinEl.innerHTML = '<i class="ti ti-coin" aria-hidden="true"></i>';
+      addXp(2);
+      if (result === coinChoice) {
+        const winnings = coinBet * 2;
+        gainCoins(winnings);
+        messageEl.textContent = (result === 'heads' ? 'Kopf' : 'Zahl') + '! Gewonnen +' + fmt(winnings) + ' Coins';
+      } else {
+        messageEl.textContent = (result === 'heads' ? 'Kopf' : 'Zahl') + '. Kein Treffer';
+      }
+      jitterBots();
+      flipping = false;
+      if (coinBet > balance && balance > 0) { coinBet = Math.max(100, balance); }
+      if (checkAutoReset()) { return; }
+      renderCoinflip();
+    }
+  }
+
+  let hiloBet = 100;
+  let hiloCurrent = 7;
+  let hiloMessage = '';
+  function renderHilo() {
+    app.innerHTML =
+      topBar('Hi-Lo') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+          '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+          '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+          '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(hiloBet) + '</span>' +
+          '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+          '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+        '</div>' +
+        '<div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:1.5rem 1rem; margin-bottom:1rem; display:flex; justify-content:center;">' +
+          '<div id="card" style="width:64px; height:88px; background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-md); display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:500;">' + hiloCurrent + '</div>' +
+        '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">' + (hiloMessage || 'Wird die naechste Karte hoeher oder niedriger sein?') + '</p>' +
+        '<div style="display:flex; gap:10px;">' +
+          '<button id="lower-btn" style="flex:1; height:44px; font-size:15px; font-weight:500;"><i class="ti ti-arrow-down" style="vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Niedriger</button>' +
+          '<button id="higher-btn" style="flex:1; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-arrow-up" style="vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Hoeher</button>' +
+        '</div>' +
+      '</div>';
+
+    backHandler();
+    const betDisplay = document.getElementById('bet-display');
+    function updateBetButtons() {
+      document.getElementById('bet-down').disabled = hiloBet <= 100;
+      document.getElementById('bet-up').disabled = hiloBet + 100 > balance;
+    }
+    document.getElementById('bet-down').addEventListener('click', () => { if (hiloBet > 100) { hiloBet -= 100; betDisplay.textContent = fmt(hiloBet); updateBetButtons(); } });
+    document.getElementById('bet-up').addEventListener('click', () => { if (hiloBet + 100 <= balance) { hiloBet += 100; betDisplay.textContent = fmt(hiloBet); updateBetButtons(); } });
+    document.getElementById('bet-max').addEventListener('click', () => { hiloBet = Math.max(100, balance); betDisplay.textContent = fmt(hiloBet); updateBetButtons(); });
+    updateBetButtons();
+
+    const cardEl = document.getElementById('card');
+    const messageEl = document.getElementById('message');
+
+    function guess(direction) {
+      if (balance < hiloBet) { hiloMessage = 'Nicht genug Guthaben fuer diesen Einsatz'; messageEl.textContent = hiloMessage; return; }
+      balance -= hiloBet;
+      const next = 1 + Math.floor(Math.random() * 13);
+      addXp(2);
+      let won = false;
+      if (direction === 'higher' && next > hiloCurrent) won = true;
+      if (direction === 'lower' && next < hiloCurrent) won = true;
+      if (won) {
+        const winnings = hiloBet * 2;
+        gainCoins(winnings);
+        hiloMessage = 'Naechste Karte: ' + next + '. Gewonnen +' + fmt(winnings) + ' Coins';
+      } else if (next === hiloCurrent) {
+        hiloMessage = 'Naechste Karte: ' + next + '. Gleichstand, verloren';
+      } else {
+        hiloMessage = 'Naechste Karte: ' + next + '. Verloren';
+      }
+      hiloCurrent = next;
+      jitterBots();
+      if (hiloBet > balance && balance > 0) { hiloBet = Math.max(100, balance); }
+      if (checkAutoReset()) { return; }
+      renderHilo();
+    }
+
+    document.getElementById('higher-btn').addEventListener('click', () => guess('higher'));
+    document.getElementById('lower-btn').addEventListener('click', () => guess('lower'));
+  }
+
+  let wheelBet = 100;
+  const wheelSegments = [1.5, 2, 0, 3, 1.5, 5, 0, 10];
+  function renderWheel() {
+    app.innerHTML =
+      topBar('Gluecksrad') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<div id="segments" style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:1rem;">' +
+          wheelSegments.map((m, i) => '<div class="seg" data-i="' + i + '" style="height:44px; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:500; border-radius:var(--border-radius-md); background:var(--color-background-secondary);">x' + m + '</div>').join('') +
+        '</div>' +
+        '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+          '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+          '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+          '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(wheelBet) + '</span>' +
+          '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+          '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+        '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">Ein Dreh, acht Felder</p>' +
+        '<button id="spin-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-player-play" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Drehen</button>' +
+      '</div>';
+
+    backHandler();
+    const betDisplay = document.getElementById('bet-display');
+    function updateBetButtons() {
+      document.getElementById('bet-down').disabled = wheelBet <= 100;
+      document.getElementById('bet-up').disabled = wheelBet + 100 > balance;
+    }
+    document.getElementById('bet-down').addEventListener('click', () => { if (wheelBet > 100) { wheelBet -= 100; betDisplay.textContent = fmt(wheelBet); updateBetButtons(); } });
+    document.getElementById('bet-up').addEventListener('click', () => { if (wheelBet + 100 <= balance) { wheelBet += 100; betDisplay.textContent = fmt(wheelBet); updateBetButtons(); } });
+    document.getElementById('bet-max').addEventListener('click', () => { wheelBet = Math.max(100, balance); betDisplay.textContent = fmt(wheelBet); updateBetButtons(); });
+    updateBetButtons();
+
+    const segEls = document.querySelectorAll('.seg');
+    const messageEl = document.getElementById('message');
+    const spinBtn = document.getElementById('spin-btn');
+    let spinning = false;
+
+    spinBtn.addEventListener('click', () => {
+      if (spinning) return;
+      if (balance < wheelBet) { messageEl.textContent = 'Nicht genug Guthaben fuer diesen Einsatz'; return; }
+      spinning = true;
+      spinBtn.disabled = true;
+      balance -= wheelBet;
+      messageEl.textContent = 'Dreht...';
+      let ticks = 0;
+      let highlighted = 0;
+      const interval = setInterval(() => {
+        segEls.forEach(s => s.style.border = '0.5px solid transparent');
+        segEls[highlighted % 8].style.border = '2px solid var(--color-border-info)';
+        highlighted++;
+        ticks++;
+        if (ticks >= 18) { clearInterval(interval); finish(); }
+      }, 90);
+    });
+
+    function finish() {
+      const idx = Math.floor(Math.random() * 8);
+      segEls.forEach(s => s.style.border = '0.5px solid transparent');
+      segEls[idx].style.border = '2px solid var(--color-border-info)';
+      const mult = wheelSegments[idx];
+      addXp(2);
+      if (mult > 0) {
+        const winnings = Math.round(wheelBet * mult);
+        gainCoins(winnings);
+        messageEl.textContent = 'Feld x' + mult + '. Gewonnen +' + fmt(winnings) + ' Coins';
+      } else {
+        messageEl.textContent = 'Feld x0. Kein Treffer';
+      }
+      jitterBots();
+      spinning = false;
+      if (wheelBet > balance && balance > 0) { wheelBet = Math.max(100, balance); }
+      if (checkAutoReset()) { return; }
+      renderWheel();
+    }
+  }
+
+  let minesBet = 100;
+  let minesState = null;
+  const MINES_SIZE = 25;
+  const MINES_COUNT = 4;
+  function minesMultiplier(revealed) {
+    return Math.pow(1.18, revealed);
+  }
+  function renderMines() {
+    if (!minesState) {
+      app.innerHTML =
+        topBar('Mines') +
+        '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+          '<div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:1rem;">' +
+            '<p style="font-size:13px; color:var(--color-text-secondary); margin:0 8px 0 0;">Einsatz</p>' +
+            '<button id="bet-down" style="width:28px; height:28px; padding:0;" aria-label="Einsatz verringern">-</button>' +
+            '<span id="bet-display" style="font-size:15px; font-weight:500; min-width:64px; text-align:center; display:inline-block;">' + fmt(minesBet) + '</span>' +
+            '<button id="bet-up" style="width:28px; height:28px; padding:0;" aria-label="Einsatz erhoehen">+</button>' +
+            '<button id="bet-max" style="height:28px; padding:0 8px; font-size:12px; margin-left:6px;">Max</button>' +
+          '</div>' +
+          '<p style="text-align:center; font-size:14px; color:var(--color-text-secondary); margin:0 0 1rem;">5x5 Feld, ' + MINES_COUNT + ' Minen. Jedes sichere Feld erhoeht den Multiplikator</p>' +
+          '<button id="start-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;"><i class="ti ti-player-play" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Runde starten</button>' +
+        '</div>';
+      backHandler();
+      const betDisplay = document.getElementById('bet-display');
+      function updateBetButtons() {
+        document.getElementById('bet-down').disabled = minesBet <= 100;
+        document.getElementById('bet-up').disabled = minesBet + 100 > balance;
+      }
+      document.getElementById('bet-down').addEventListener('click', () => { if (minesBet > 100) { minesBet -= 100; betDisplay.textContent = fmt(minesBet); updateBetButtons(); } });
+      document.getElementById('bet-up').addEventListener('click', () => { if (minesBet + 100 <= balance) { minesBet += 100; betDisplay.textContent = fmt(minesBet); updateBetButtons(); } });
+      document.getElementById('bet-max').addEventListener('click', () => { minesBet = Math.max(100, balance); betDisplay.textContent = fmt(minesBet); updateBetButtons(); });
+      updateBetButtons();
+      document.getElementById('start-btn').addEventListener('click', () => {
+        if (balance < minesBet) { document.querySelector('p[style*="text-align:center"]').textContent = 'Nicht genug Guthaben fuer diesen Einsatz'; return; }
+        balance -= minesBet;
+        const minePositions = new Set();
+        while (minePositions.size < MINES_COUNT) { minePositions.add(Math.floor(Math.random() * MINES_SIZE)); }
+        minesState = { mines: minePositions, revealed: new Set(), done: false, busted: false };
+        renderMines();
+      });
+      return;
+    }
+
+    const revealedCount = minesState.revealed.size;
+    const currentMult = minesMultiplier(revealedCount);
+    const potential = Math.round(minesBet * currentMult);
+
+    let cells = '';
+    for (let i = 0; i < MINES_SIZE; i++) {
+      const isRevealed = minesState.revealed.has(i);
+      const isMine = minesState.mines.has(i);
+      const showMine = minesState.done && isMine;
+      let bg = 'var(--color-background-secondary)';
+      let content = '';
+      if (isRevealed) { bg = 'var(--color-background-success)'; content = '<i class="ti ti-check" aria-hidden="true"></i>'; }
+      if (showMine) { bg = 'var(--color-background-danger)'; content = '<i class="ti ti-bomb" aria-hidden="true"></i>'; }
+      cells += '<button class="cell-btn" data-i="' + i + '" ' + (isRevealed || minesState.done ? 'disabled' : '') + ' style="aspect-ratio:1; font-size:16px; background:' + bg + '; border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-md);">' + content + '</button>';
+    }
+
+    app.innerHTML =
+      topBar('Mines') +
+      '<div style="background:var(--color-background-primary); border-radius:var(--border-radius-lg); border:0.5px solid var(--color-border-tertiary); padding:1.25rem;">' +
+        '<div style="display:flex; justify-content:space-between; margin-bottom:10px;">' +
+          '<span style="font-size:13px; color:var(--color-text-secondary);">Multiplikator x' + currentMult.toFixed(2) + '</span>' +
+          '<span style="font-size:13px; font-weight:500;">Bei Cashout: ' + fmt(potential) + ' Coins</span>' +
+        '</div>' +
+        '<div id="mines-grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-bottom:1rem;">' + cells + '</div>' +
+        '<p id="message" style="text-align:center; font-size:14px; color:var(--color-text-secondary); min-height:20px; margin:0 0 1rem;">' + (minesState.done ? (minesState.busted ? 'Mine getroffen. Verloren' : 'Ausgezahlt') : 'Feld waehlen oder auszahlen') + '</p>' +
+        (minesState.done
+          ? '<button id="next-btn" style="width:100%; height:44px; font-size:15px; font-weight:500;">Neue Runde</button>'
+          : '<button id="cashout-btn" style="width:100%; height:44px; font-size:15px; font-weight:500; background:var(--color-background-info); color:var(--color-text-info); border:none;" ' + (revealedCount === 0 ? 'disabled' : '') + '><i class="ti ti-cash" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Auszahlen</button>') +
+      '</div>';
+
+    backHandler();
+
+    if (!minesState.done) {
+      document.querySelectorAll('.cell-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = parseInt(btn.getAttribute('data-i'));
+          if (minesState.mines.has(i)) {
+            minesState.done = true;
+            minesState.busted = true;
+            addXp(2);
+            jitterBots();
+            checkAutoReset();
+            renderMines();
+          } else {
+            minesState.revealed.add(i);
+            addXp(1);
+            if (minesState.revealed.size === MINES_SIZE - MINES_COUNT) {
+              const winnings = Math.round(minesBet * minesMultiplier(minesState.revealed.size));
+              gainCoins(winnings);
+              minesState.done = true;
+              checkAutoReset();
+            }
+            renderMines();
+          }
+        });
+      });
+      const cashoutBtn = document.getElementById('cashout-btn');
+      if (cashoutBtn) {
+        cashoutBtn.addEventListener('click', () => {
+          const winnings = Math.round(minesBet * minesMultiplier(minesState.revealed.size));
+          gainCoins(winnings);
+          minesState.done = true;
+          jitterBots();
+          checkAutoReset();
+          renderMines();
+        });
+      }
+    } else {
+      document.getElementById('next-btn').addEventListener('click', () => { minesState = null; renderMines(); });
+    }
+  }
+
+  function renderUpgrades() {
+    app.innerHTML =
+      topBar('Upgrades') +
+      '<div style="display:flex; flex-direction:column; gap:1.25rem;">' +
+        '<div>' +
+          '<p style="font-size:13px; font-weight:500; margin:0 0 8px;">Slot-Symbole</p>' +
+          '<div style="display:flex; flex-direction:column; gap:8px;">' +
+            slotSymbols.map(s => upgradeRow('slot', s.sym, s.icon, s.label, slotLevels[s.sym])).join('') +
+          '</div>' +
+        '</div>' +
+        '<div>' +
+          '<p style="font-size:13px; font-weight:500; margin:0 0 8px;">Wuerfel-Zahlen</p>' +
+          '<div style="display:flex; flex-direction:column; gap:8px;">' +
+            diceNumbers.map(n => upgradeRow('dice', n, 'ti-dice-' + n, 'Zahl ' + n, diceLevels[n])).join('') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    backHandler();
+    document.querySelectorAll('.upgrade-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const type = btn.getAttribute('data-type');
+        const key = btn.getAttribute('data-key');
+        const levels = type === 'slot' ? slotLevels : diceLevels;
+        const lvl = levels[key];
+        if (lvl >= MAX_LEVEL) return;
+        const cost = upgradeCost(lvl);
+        if (xp < cost) return;
+        xp -= cost;
+        levels[key] = lvl + 1;
+        renderUpgrades();
+      });
+    });
+  }
+
+  function upgradeRow(type, key, icon, label, level) {
+    const cost = upgradeCost(level);
+    const maxed = level >= MAX_LEVEL;
+    const canAfford = xp >= cost;
+    return '<div style="display:flex; align-items:center; gap:12px; background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-md); padding:10px 12px;">' +
+      '<div style="width:32px; height:32px; border-radius:var(--border-radius-md); background:var(--color-background-secondary); display:flex; align-items:center; justify-content:center;"><i class="ti ' + icon + '" aria-hidden="true"></i></div>' +
+      '<div style="flex:1;">' +
+        '<p style="font-size:13px; font-weight:500; margin:0;">' + label + '</p>' +
+        '<p style="font-size:11px; color:var(--color-text-secondary); margin:0;">Stufe ' + level + '/' + MAX_LEVEL + ' \u00b7 +' + (level * 6) + '% Chance \u00b7 +' + (level * 6) + '% Multiplikator</p>' +
+      '</div>' +
+      (maxed
+        ? '<span style="font-size:11px; color:var(--color-text-tertiary); padding:0 8px;">Max</span>'
+        : '<button class="upgrade-btn" data-type="' + type + '" data-key="' + key + '" ' + (canAfford ? '' : 'disabled') + ' style="font-size:12px; padding:0 10px; height:32px;">' + fmt(cost) + ' XP</button>') +
+    '</div>';
+  }
+
+  render();
+})();
+</script>
